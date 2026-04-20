@@ -1,16 +1,24 @@
 import streamlit as st
 import pandas as pd
 import matplotlib.pyplot as plt
+from matplotlib.ticker import MultipleLocator # 5円区切りの目盛りのために追加
 from datetime import datetime, timedelta
-from zoneinfo import ZoneInfo  # タイムゾーンを指定するためのツールを追加
+from zoneinfo import ZoneInfo
 import requests
 import io
 
 # ページ設定
 st.set_page_config(page_title="JEPX関西スポット価格", layout="wide")
 
-st.title("⚡ JEPX関西スポット価格")
-st.markdown("<p style='font-size: 14px; color: #666666;'>※表示価格は手数料や託送料、税を含まない金額です。</p>", unsafe_allow_html=True)
+# セッション状態でy_maxを管理（タブ切り替え時も値を保持するため）
+# デフォルト値を35に設定
+if 'y_max' not in st.session_state:
+    st.session_state.y_max = 35
+
+# タイトル部分
+st.subheader("JEPX関西スポット価格")
+# margin-topを負の値にして間隔を詰める
+st.markdown("<p style='font-size: 14px; color: #666666; margin-top: -10px;'>※表示価格は手数料や託送料、税を含まない金額です。</p>", unsafe_allow_html=True)
 
 # 日本時間を取得するための関数を用意
 def get_jst_now():
@@ -52,8 +60,6 @@ if data is not None:
     
     kansai_col = 'エリアプライス関西(円/kWh)'
     
-    st.markdown("---")
-    
     current_slot = (now.hour * 2) + (1 if now.minute >= 30 else 0) + 1
     start_m = 30 if now.minute >= 30 else 0
     end_h = now.hour + (1 if start_m == 30 else 0)
@@ -68,13 +74,13 @@ if data is not None:
         except IndexError:
             current_price = "取得中..."
 
+    # 余白を狭く修正、区切り線なし
     st.markdown(f"""
-    <div style="background-color: #f8f9fa; padding: 20px; border-radius: 10px; text-align: center; border: 2px solid #e0e0e0;">
-        <p style="font-size: 20px; margin: 0; color: #333;">現在時刻: <strong>{now.strftime('%H:%M')}</strong> ｜ 当該時間帯: <strong>{time_range_str}</strong></p>
-        <h1 style="font-size: 56px; color: #D35400; margin: 10px 0;">現在単価: {current_price} <span style="font-size: 24px;">円/kWh</span></h1>
+    <div style="background-color: #f8f9fa; padding: 10px; border-radius: 10px; text-align: center; border: 2px solid #e0e0e0; margin-bottom: 5px;">
+        <p style="font-size: 16px; margin: 0; color: #333;">現在時刻: <strong>{now.strftime('%H:%M')}</strong> ｜ 当該時間帯: <strong>{time_range_str}</strong></p>
+        <h1 style="font-size: 40px; color: #D35400; margin: 5px 0;">現在単価: {current_price} <span style="font-size: 20px;">円/kWh</span></h1>
     </div>
     """, unsafe_allow_html=True)
-    st.markdown("---")
 
     tab_today, tab_tomorrow, tab_yesterday = st.tabs(["📊 本日の価格推移", "📅 明日の価格推移", "⏪ 昨日の実績"])
 
@@ -116,16 +122,41 @@ if data is not None:
                 
                 ax.plot(df_target['hour'], df_target[kansai_col], marker='o', color=color)
                 
+                # 線やマーカーが切れないように、x軸にマージンを持たせる
+                ax.set_xlim(left=0, right=24)
+                # Y軸の下限を-2にすることで、0円付近のマーカーが隠れるのを防ぎます
+                ax.set_ylim(bottom=-2, top=st.session_state.y_max)
+
                 if label == "本日":
                     ax.axvline(x=(current_slot-1)*0.5, color='red', linestyle='--', label='Current Time')
                     ax.legend()
                     
                 ax.set_ylabel("Price (Yen/kWh)")
                 ax.set_xlabel("Time (Hour)")
+                
+                # 5円ごとに横方向のグリッド線を引く
+                ax.yaxis.set_major_locator(MultipleLocator(5))
+                
                 ax.grid(True, alpha=0.3)
                 ax.set_xticks(range(0, 25, 2))
                 st.pyplot(fig)
                 plt.close(fig)
+
+            # スライダー
+            st.write("---")
+            col_slider, _ = st.columns([1, 2])
+            with col_slider:
+                new_y_max = st.slider(
+                    "📈 JEPX価格グラフのY軸上限を設定 (円/kWh)",
+                    min_value=10,
+                    max_value=100,
+                    value=st.session_state.y_max,
+                    step=5,
+                    key=f"slider_{label}"
+                )
+                if new_y_max != st.session_state.y_max:
+                    st.session_state.y_max = new_y_max
+                    st.rerun()
 
 else:
     st.error("JEPXからデータを読み込めませんでした。URLを確認してください。")
